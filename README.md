@@ -2,6 +2,10 @@
 
 Running CLIs via containers, and using container images as the distribution method.
 
+`clix` makes it easy to "install" tools into your path, and takes care of downloading them and running them in whatever sandbox is available (Mac, Windows, Linux, inside a container like a kubernetes pod etc).
+
+We support selective sandboxing, so (for example) the AWS CLI won't need access to your gcloud credentials, and the gcloud CLI won't need access to your AWS credentials.
+
 ## Contributing
 
 This project is licensed under the [Apache 2.0 License](LICENSE).
