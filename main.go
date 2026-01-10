@@ -6,16 +6,16 @@ import (
 	"os"
 	"os/exec"
 
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 )
 
 type Script struct {
-	Go *GoConfig `yaml:"go"`
+	Go *GoConfig `json:"go"`
 }
 
 type GoConfig struct {
-	Run     string `yaml:"run"`
-	Version string `yaml:"version"`
+	Run     string `json:"run"`
+	Version string `json:"version,omitempty"`
 }
 
 func main() {
