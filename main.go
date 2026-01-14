@@ -71,7 +71,10 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 }
 
 func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []string) error {
-	cmdArgs := []string{"run", "-it"}
+	cmdArgs := []string{"run", "-i"}
+	if isTerminal(stdin) {
+		cmdArgs = append(cmdArgs, "-t")
+	}
 	if script.Entrypoint != "" {
 		cmdArgs = append(cmdArgs, "--entrypoint", script.Entrypoint)
 	}
@@ -91,6 +94,18 @@ func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []
 		return fmt.Errorf("error running docker command: %w", err)
 	}
 	return nil
+}
+
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	fileInfo, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (fileInfo.Mode() & os.ModeCharDevice) != 0
 }
 
 func runGo(stdin io.Reader, stdout, stderr io.Writer, config *GoConfig, args []string) error {

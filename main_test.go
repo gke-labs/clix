@@ -78,7 +78,7 @@ func TestRunDocker(t *testing.T) {
 	scriptPath := filepath.Join(tmpDir, "test-script-docker")
 
 	scriptContent := `#!/usr/bin/env clix
-image: google/cloud-sdk:stable
+image: alpine
 entrypoint: echo
 `
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
