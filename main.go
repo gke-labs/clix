@@ -24,7 +24,9 @@ import (
 )
 
 type Script struct {
-	Go *GoConfig `json:"go"`
+	Go         *GoConfig `json:"go,omitempty"`
+	Image      string    `json:"image,omitempty"`
+	Entrypoint string    `json:"entrypoint,omitempty"`
 }
 
 type GoConfig struct {
@@ -57,12 +59,58 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 		return fmt.Errorf("error parsing script file: %w", err)
 	}
 
-	if script.Go == nil {
-		return fmt.Errorf("error: 'go' configuration missing in script")
+	if script.Image != "" {
+		return runDocker(stdin, stdout, stderr, script, scriptArgs)
 	}
 
-	goPackage := script.Go.Run
-	version := script.Go.Version
+	if script.Go != nil {
+		return runGo(stdin, stdout, stderr, script.Go, scriptArgs)
+	}
+
+	return fmt.Errorf("error: script configuration missing (expected 'go' or 'image')")
+}
+
+func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []string) error {
+	cmdArgs := []string{"run", "-i"}
+	if isTerminal(stdin) {
+		cmdArgs = append(cmdArgs, "-t")
+	}
+	if script.Entrypoint != "" {
+		cmdArgs = append(cmdArgs, "--entrypoint", script.Entrypoint)
+	}
+	cmdArgs = append(cmdArgs, script.Image)
+	cmdArgs = append(cmdArgs, args...)
+
+	cmd := exec.Command("docker", cmdArgs...)
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// Propagate the exit code from the subcommand
+			os.Exit(exitErr.ExitCode())
+		}
+		return fmt.Errorf("error running docker command: %w", err)
+	}
+	return nil
+}
+
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	fileInfo, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (fileInfo.Mode() & os.ModeCharDevice) != 0
+}
+
+func runGo(stdin io.Reader, stdout, stderr io.Writer, config *GoConfig, args []string) error {
+	goPackage := config.Run
+	version := config.Version
 
 	if goPackage == "" {
 		return fmt.Errorf("error: 'go.run' missing in script")
@@ -73,7 +121,7 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 		target = fmt.Sprintf("%s@%s", goPackage, version)
 	}
 
-	cmdArgs := append([]string{"run", target}, scriptArgs...)
+	cmdArgs := append([]string{"run", target}, args...)
 	cmd := exec.Command("go", cmdArgs...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
