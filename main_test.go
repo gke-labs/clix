@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -64,5 +65,40 @@ go:
 
 	if !strings.Contains(output, "Arg 0: foo") {
 		t.Errorf("Expected output to contain 'Arg 0: foo', got %q", output)
+	}
+}
+
+func TestRunDocker(t *testing.T) {
+	_, err := exec.LookPath("docker")
+	if err != nil {
+		t.Skip("docker not found")
+	}
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "test-script-docker")
+
+	scriptContent := `#!/usr/bin/env clix
+image: google/cloud-sdk:stable
+entrypoint: echo
+`
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("Failed to write script: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("")
+
+	// We use 'echo' as entrypoint and pass 'hello' as arg.
+	// Expected output: hello
+	args := []string{"clix", scriptPath, "hello"}
+
+	err = run(stdin, &stdout, &stderr, args)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "hello") {
+		t.Errorf("Expected output to contain 'hello', got %q", output)
 	}
 }
