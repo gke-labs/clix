@@ -14,8 +14,8 @@ We will add a `mounts` section to the script configuration.
 
 ```yaml
 mounts:
-  - host: <expression>
-    target: <path> # Optional, defaults to host path
+  - hostPath: <expression>
+    sandboxPath: <path> # Optional, defaults to host path
     readOnly: <boolean> # Optional, defaults to false (not implemented yet)
 ```
 
@@ -45,7 +45,7 @@ For tools defined with `go:`, we will use the `golang` official image.
 go:
   run: github.com/example/tool
 mounts:
-- host: git.repoRoot(cwd)
+- hostPath: git.repoRoot(cwd)
 ```
 
 This will result in:

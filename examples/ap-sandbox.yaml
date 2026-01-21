@@ -4,4 +4,4 @@ go:
   run: github.com/gke-labs/gke-labs-infra/ap
   version: latest
 mounts:
-- host: git.repoRoot(cwd)
+- hostPath: git.repoRoot(cwd)

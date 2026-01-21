@@ -32,8 +32,8 @@ type Script struct {
 }
 
 type Mount struct {
-	Host   string `json:"host"`
-	Target string `json:"target,omitempty"`
+	HostPath    string `json:"hostPath"`
+	SandboxPath string `json:"sandboxPath,omitempty"`
 }
 
 type GoConfig struct {
@@ -103,13 +103,15 @@ func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []
 	}
 
 	for _, m := range resolvedMounts {
-		cmdArgs = append(cmdArgs, "-v", fmt.Sprintf("%s:%s", m.Host, m.Target))
+		cmdArgs = append(cmdArgs, "-v", fmt.Sprintf("%s:%s", m.HostPath, m.SandboxPath))
 	}
 
 	// Set working directory to CWD if possible
-	if cwd, err := os.Getwd(); err == nil {
-		cmdArgs = append(cmdArgs, "-w", cwd)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("error getting current working directory: %w", err)
 	}
+	cmdArgs = append(cmdArgs, "-w", cwd)
 
 	if script.Entrypoint != "" {
 		cmdArgs = append(cmdArgs, "--entrypoint", script.Entrypoint)
@@ -139,15 +141,15 @@ func resolveMounts(mounts []Mount) ([]Mount, error) {
 		return nil, err
 	}
 	for _, m := range mounts {
-		if m.Host == "git.repoRoot(cwd)" {
+		if m.HostPath == "git.repoRoot(cwd)" {
 			root, err := findGitRoot(cwd)
 			if err != nil {
 				return nil, fmt.Errorf("failed to find git root: %w", err)
 			}
-			m.Host = root
+			m.HostPath = root
 		}
-		if m.Target == "" {
-			m.Target = m.Host
+		if m.SandboxPath == "" {
+			m.SandboxPath = m.HostPath
 		}
 		resolved = append(resolved, m)
 	}
