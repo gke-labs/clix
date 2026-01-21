@@ -102,3 +102,61 @@ entrypoint: echo
 		t.Errorf("Expected output to contain 'hello', got %q", output)
 	}
 }
+
+func TestResolveMounts(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("failed to get user home: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		input    []Mount
+		expected []Mount
+	}{
+		{
+			name: "Home directory expansion",
+			input: []Mount{
+				{HostPath: "~/.config"},
+				{HostPath: "~/data"},
+				{HostPath: "~"},
+			},
+			expected: []Mount{
+				{HostPath: filepath.Join(home, ".config"), SandboxPath: filepath.Join(home, ".config")},
+				{HostPath: filepath.Join(home, "data"), SandboxPath: filepath.Join(home, "data")},
+				{HostPath: home, SandboxPath: home},
+			},
+		},
+		{
+			name: "No expansion",
+			input: []Mount{
+				{HostPath: "/absolute/path"},
+			},
+			expected: []Mount{
+				{HostPath: "/absolute/path", SandboxPath: "/absolute/path"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveMounts(tt.input)
+			if err != nil {
+				t.Fatalf("resolveMounts failed: %v", err)
+			}
+
+			if len(got) != len(tt.expected) {
+				t.Fatalf("expected %d mounts, got %d", len(tt.expected), len(got))
+			}
+
+			for i, m := range got {
+				if m.HostPath != tt.expected[i].HostPath {
+					t.Errorf("mount[%d].HostPath = %q, want %q", i, m.HostPath, tt.expected[i].HostPath)
+				}
+				if m.SandboxPath != tt.expected[i].SandboxPath {
+					t.Errorf("mount[%d].SandboxPath = %q, want %q", i, m.SandboxPath, tt.expected[i].SandboxPath)
+				}
+			}
+		})
+	}
+}

@@ -1,0 +1,6 @@
+#!/usr/bin/env clix
+
+image: gcr.io/google.com/cloudsdktool/google-cloud-cli:stable
+mounts:
+  - hostPath: ~/.config/gcloud
+    sandboxPath: /root/.config/gcloud
