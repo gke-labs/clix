@@ -1,0 +1,7 @@
+#!/usr/bin/env clix
+
+go:
+  run: github.com/gke-labs/gke-labs-infra/ap
+  version: latest
+mounts:
+- hostPath: git.repoRoot(cwd)
