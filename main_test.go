@@ -112,6 +112,7 @@ func TestResolveMounts(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    []Mount
+		imageSHA string
 		expected []Mount
 	}{
 		{
@@ -140,7 +141,7 @@ func TestResolveMounts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveMounts(tt.input)
+			got, err := resolveMounts(tt.input, tt.imageSHA)
 			if err != nil {
 				t.Fatalf("resolveMounts failed: %v", err)
 			}
@@ -162,6 +163,13 @@ func TestResolveMounts(t *testing.T) {
 }
 
 func TestBuildDockerArgs(t *testing.T) {
+	// Mock getImageSHA
+	originalGetImageSHA := getImageSHAFn
+	defer func() { getImageSHAFn = originalGetImageSHA }()
+	getImageSHAFn = func(image string) (string, error) {
+		return "mocksha256", nil
+	}
+
 	// 1. Basic case
 	script := Script{
 		Image: "python:3.11",
@@ -183,11 +191,14 @@ func TestBuildDockerArgs(t *testing.T) {
 		t.Errorf("Expected image python:3.11 in args, got %v", cmdArgs)
 	}
 
-	// 2. Python cache enabled
+	// 2. Python cache enabled via explicit mounts and env
 	scriptPython := Script{
 		Image: "python:3.11",
-		Python: &PythonConfig{
-			Cache: true,
+		Mounts: []Mount{
+			{HostPath: "{cacheDir}/python", SandboxPath: "/tmp/.clix-pycache"},
+		},
+		Env: []EnvVar{
+			{Name: "PYTHONPYCACHEPREFIX", Value: "/tmp/.clix-pycache"},
 		},
 	}
 	cmdArgs, err = buildDockerArgs(scriptPython, args, false)
@@ -198,16 +209,21 @@ func TestBuildDockerArgs(t *testing.T) {
 	// Check for env var and mount
 	foundEnv := false
 	foundMount := false
-
+	
 	cacheMountDest := "/tmp/.clix-pycache"
 	envVar := "PYTHONPYCACHEPREFIX=" + cacheMountDest
+	
+	// We expect the mount path to contain the SHA
+	expectedHostPathPart := "mocksha256/python"
 
 	for i, arg := range cmdArgs {
 		if arg == "-e" && i+1 < len(cmdArgs) && cmdArgs[i+1] == envVar {
 			foundEnv = true
 		}
 		if arg == "-v" && i+1 < len(cmdArgs) && strings.Contains(cmdArgs[i+1], ":"+cacheMountDest) {
-			foundMount = true
+			if strings.Contains(cmdArgs[i+1], expectedHostPathPart) {
+				foundMount = true
+			}
 		}
 	}
 
@@ -215,6 +231,6 @@ func TestBuildDockerArgs(t *testing.T) {
 		t.Errorf("Expected environment variable %s, got args: %v", envVar, cmdArgs)
 	}
 	if !foundMount {
-		t.Errorf("Expected mount for %s, got args: %v", cacheMountDest, cmdArgs)
+		t.Errorf("Expected mount for %s with host path containing %s, got args: %v", cacheMountDest, expectedHostPathPart, cmdArgs)
 	}
 }
