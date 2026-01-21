@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -140,6 +141,11 @@ func resolveMounts(mounts []Mount) ([]Mount, error) {
 	if err != nil {
 		return nil, err
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
 	for _, m := range mounts {
 		if m.HostPath == "git.repoRoot(cwd)" {
 			root, err := findGitRoot(cwd)
@@ -148,6 +154,13 @@ func resolveMounts(mounts []Mount) ([]Mount, error) {
 			}
 			m.HostPath = root
 		}
+
+		if strings.HasPrefix(m.HostPath, "~/") {
+			m.HostPath = filepath.Join(home, m.HostPath[2:])
+		} else if m.HostPath == "~" {
+			m.HostPath = home
+		}
+
 		if m.SandboxPath == "" {
 			m.SandboxPath = m.HostPath
 		}
