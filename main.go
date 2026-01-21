@@ -26,10 +26,15 @@ import (
 )
 
 type Script struct {
-	Go         *GoConfig `json:"go,omitempty"`
-	Image      string    `json:"image,omitempty"`
-	Entrypoint string    `json:"entrypoint,omitempty"`
-	Mounts     []Mount   `json:"mounts,omitempty"`
+	Go         *GoConfig     `json:"go,omitempty"`
+	Python     *PythonConfig `json:"python,omitempty"`
+	Image      string        `json:"image,omitempty"`
+	Entrypoint string        `json:"entrypoint,omitempty"`
+	Mounts     []Mount       `json:"mounts,omitempty"`
+}
+
+type PythonConfig struct {
+	Cache bool `json:"cache,omitempty"`
 }
 
 type Mount struct {
@@ -93,32 +98,10 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 }
 
 func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []string) error {
-	cmdArgs := []string{"run", "-i"}
-	if isTerminal(stdin) {
-		cmdArgs = append(cmdArgs, "-t")
-	}
-
-	resolvedMounts, err := resolveMounts(script.Mounts)
+	cmdArgs, err := buildDockerArgs(script, args, isTerminal(stdin))
 	if err != nil {
-		return fmt.Errorf("error resolving mounts: %w", err)
+		return fmt.Errorf("error building docker args: %w", err)
 	}
-
-	for _, m := range resolvedMounts {
-		cmdArgs = append(cmdArgs, "-v", fmt.Sprintf("%s:%s", m.HostPath, m.SandboxPath))
-	}
-
-	// Set working directory to CWD if possible
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("error getting current working directory: %w", err)
-	}
-	cmdArgs = append(cmdArgs, "-w", cwd)
-
-	if script.Entrypoint != "" {
-		cmdArgs = append(cmdArgs, "--entrypoint", script.Entrypoint)
-	}
-	cmdArgs = append(cmdArgs, script.Image)
-	cmdArgs = append(cmdArgs, args...)
 
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Stdin = stdin
@@ -133,6 +116,56 @@ func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []
 		return fmt.Errorf("error running docker command: %w", err)
 	}
 	return nil
+}
+
+func buildDockerArgs(script Script, args []string, isTerm bool) ([]string, error) {
+	cmdArgs := []string{"run", "-i"}
+	if isTerm {
+		cmdArgs = append(cmdArgs, "-t")
+	}
+
+	if script.Python != nil && script.Python.Cache {
+		userCache, err := os.UserCacheDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user cache dir: %w", err)
+		}
+		hostCache := filepath.Join(userCache, "clix", "python")
+		if err := os.MkdirAll(hostCache, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create cache dir: %w", err)
+		}
+		containerCache := "/tmp/.clix-pycache"
+
+		script.Mounts = append(script.Mounts, Mount{
+			HostPath:    hostCache,
+			SandboxPath: containerCache,
+		})
+
+		cmdArgs = append(cmdArgs, "-e", fmt.Sprintf("PYTHONPYCACHEPREFIX=%s", containerCache))
+	}
+
+	resolvedMounts, err := resolveMounts(script.Mounts)
+	if err != nil {
+		return nil, fmt.Errorf("error resolving mounts: %w", err)
+	}
+
+	for _, m := range resolvedMounts {
+		cmdArgs = append(cmdArgs, "-v", fmt.Sprintf("%s:%s", m.HostPath, m.SandboxPath))
+	}
+
+	// Set working directory to CWD if possible
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("error getting current working directory: %w", err)
+	}
+	cmdArgs = append(cmdArgs, "-w", cwd)
+
+	if script.Entrypoint != "" {
+		cmdArgs = append(cmdArgs, "--entrypoint", script.Entrypoint)
+	}
+	cmdArgs = append(cmdArgs, script.Image)
+	cmdArgs = append(cmdArgs, args...)
+
+	return cmdArgs, nil
 }
 
 func resolveMounts(mounts []Mount) ([]Mount, error) {

@@ -160,3 +160,61 @@ func TestResolveMounts(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildDockerArgs(t *testing.T) {
+	// 1. Basic case
+	script := Script{
+		Image: "python:3.11",
+	}
+	args := []string{"script.py"}
+	cmdArgs, err := buildDockerArgs(script, args, false)
+	if err != nil {
+		t.Fatalf("buildDockerArgs failed: %v", err)
+	}
+	// Check basics
+	// cmdArgs: [run -i -w ... image args...]
+	foundImage := false
+	for _, arg := range cmdArgs {
+		if arg == "python:3.11" {
+			foundImage = true
+		}
+	}
+	if !foundImage {
+		t.Errorf("Expected image python:3.11 in args, got %v", cmdArgs)
+	}
+
+	// 2. Python cache enabled
+	scriptPython := Script{
+		Image: "python:3.11",
+		Python: &PythonConfig{
+			Cache: true,
+		},
+	}
+	cmdArgs, err = buildDockerArgs(scriptPython, args, false)
+	if err != nil {
+		t.Fatalf("buildDockerArgs failed: %v", err)
+	}
+
+	// Check for env var and mount
+	foundEnv := false
+	foundMount := false
+
+	cacheMountDest := "/tmp/.clix-pycache"
+	envVar := "PYTHONPYCACHEPREFIX=" + cacheMountDest
+
+	for i, arg := range cmdArgs {
+		if arg == "-e" && i+1 < len(cmdArgs) && cmdArgs[i+1] == envVar {
+			foundEnv = true
+		}
+		if arg == "-v" && i+1 < len(cmdArgs) && strings.Contains(cmdArgs[i+1], ":"+cacheMountDest) {
+			foundMount = true
+		}
+	}
+
+	if !foundEnv {
+		t.Errorf("Expected environment variable %s, got args: %v", envVar, cmdArgs)
+	}
+	if !foundMount {
+		t.Errorf("Expected mount for %s, got args: %v", cacheMountDest, cmdArgs)
+	}
+}
