@@ -1,0 +1,5 @@
+#!/usr/bin/env clix
+
+go:
+  run: github.com/gke-labs/clix/tools/github-admin
+  version: latest
