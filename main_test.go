@@ -209,10 +209,10 @@ func TestBuildDockerArgs(t *testing.T) {
 	// Check for env var and mount
 	foundEnv := false
 	foundMount := false
-	
+
 	cacheMountDest := "/tmp/.clix-pycache"
 	envVar := "PYTHONPYCACHEPREFIX=" + cacheMountDest
-	
+
 	// We expect the mount path to contain the SHA
 	expectedHostPathPart := "mocksha256/python"
 
