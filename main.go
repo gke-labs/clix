@@ -15,6 +15,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -25,12 +27,21 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+var execCommand = exec.Command
+
 type Script struct {
-	Go         *GoConfig `json:"go,omitempty"`
-	Image      string    `json:"image,omitempty"`
-	Entrypoint string    `json:"entrypoint,omitempty"`
-	Mounts     []Mount   `json:"mounts,omitempty"`
-	Env        []EnvVar  `json:"env,omitempty"`
+	Go         *GoConfig    `json:"go,omitempty"`
+	Build      *BuildConfig `json:"build,omitempty"`
+	Image      string       `json:"image,omitempty"`
+	Entrypoint string       `json:"entrypoint,omitempty"`
+	Mounts     []Mount      `json:"mounts,omitempty"`
+	Env        []EnvVar     `json:"env,omitempty"`
+}
+
+type BuildConfig struct {
+	Git        string `json:"git"`
+	Branch     string `json:"branch,omitempty"`
+	Dockerfile string `json:"dockerfile,omitempty"`
 }
 
 type EnvVar struct {
@@ -73,6 +84,14 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 		return fmt.Errorf("error parsing script file: %w", err)
 	}
 
+	if script.Build != nil {
+		imageName, err := buildImage(stdin, stdout, stderr, script.Build)
+		if err != nil {
+			return fmt.Errorf("error building image: %w", err)
+		}
+		script.Image = imageName
+	}
+
 	if script.Image != "" {
 		return runDocker(stdin, stdout, stderr, script, scriptArgs)
 	}
@@ -104,7 +123,7 @@ func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []
 		return fmt.Errorf("error building docker args: %w", err)
 	}
 
-	cmd := exec.Command("docker", cmdArgs...)
+	cmd := execCommand("docker", cmdArgs...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -175,7 +194,7 @@ func buildDockerArgs(script Script, args []string, isTerm bool) ([]string, error
 var getImageSHAFn = getImageSHA
 
 func getImageSHA(image string) (string, error) {
-	cmd := exec.Command("docker", "images", "--no-trunc", "--quiet", image)
+	cmd := execCommand("docker", "images", "--no-trunc", "--quiet", image)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("error running docker images: %w", err)
@@ -242,7 +261,7 @@ func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
 }
 
 func findGitRoot(path string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd := execCommand("git", "rev-parse", "--show-toplevel")
 	cmd.Dir = path
 	out, err := cmd.Output()
 	if err != nil {
@@ -277,7 +296,7 @@ func runGo(stdin io.Reader, stdout, stderr io.Writer, config *GoConfig, args []s
 	}
 
 	cmdArgs := append([]string{"run", target}, args...)
-	cmd := exec.Command("go", cmdArgs...)
+	cmd := execCommand("go", cmdArgs...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -291,4 +310,114 @@ func runGo(stdin io.Reader, stdout, stderr io.Writer, config *GoConfig, args []s
 	}
 
 	return nil
+}
+
+func buildImage(stdin io.Reader, stdout, stderr io.Writer, build *BuildConfig) (string, error) {
+	if build.Git == "" {
+		return "", fmt.Errorf("build.git is required")
+	}
+
+	// Get the latest commit hash from the remote
+	commitHash, err := getRemoteHead(build.Git, build.Branch)
+	if err != nil {
+		return "", fmt.Errorf("failed to get remote head: %w", err)
+	}
+
+	// Construct image tag: clix-<hash-of-repo-url>:<commit-hash>
+	repoHash := sha256.Sum256([]byte(build.Git))
+	repoHashStr := hex.EncodeToString(repoHash[:])[:8] // Short hash for readability
+
+	// Extract base name for readability
+	parts := strings.Split(build.Git, "/")
+	baseName := parts[len(parts)-1]
+	baseName = strings.TrimSuffix(baseName, ".git")
+	baseName = strings.ReplaceAll(baseName, ":", "-")
+	// Clean up baseName further if needed, for now assume standard repo names
+
+	imageTag := fmt.Sprintf("clix-%s-%s:%s", baseName, repoHashStr, commitHash)
+
+	// Check if image exists
+	exists, err := imageExists(imageTag)
+	if err != nil {
+		return "", fmt.Errorf("failed to check if image exists: %w", err)
+	}
+
+	if exists {
+		return imageTag, nil
+	}
+
+	// Clone and build
+	tempDir, err := os.MkdirTemp("", "clix-build-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Clone
+	cloneArgs := []string{"clone", "--depth", "1"}
+	if build.Branch != "" {
+		cloneArgs = append(cloneArgs, "--branch", build.Branch)
+	}
+	cloneArgs = append(cloneArgs, build.Git, tempDir)
+
+	fmt.Fprintf(stderr, "Cloning %s...\n", build.Git)
+	cmd := execCommand("git", cloneArgs...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git clone failed: %w", err)
+	}
+
+	// Build
+	dockerfile := "Dockerfile"
+	if build.Dockerfile != "" {
+		dockerfile = build.Dockerfile
+	}
+
+	buildArgs := []string{"buildx", "build", "-f", dockerfile, "--load", "--tag", imageTag, "."}
+
+	fmt.Fprintf(stderr, "Building image %s...\n", imageTag)
+	cmd = execCommand("docker", buildArgs...)
+	cmd.Dir = tempDir
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("docker build failed: %w", err)
+	}
+
+	return imageTag, nil
+}
+
+func getRemoteHead(repo, branch string) (string, error) {
+	args := []string{"ls-remote", repo}
+	if branch != "" {
+		args = append(args, branch)
+	} else {
+		args = append(args, "HEAD")
+	}
+
+	cmd := execCommand("git", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return "", fmt.Errorf("no output from git ls-remote")
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) == 0 {
+		return "", fmt.Errorf("could not parse git ls-remote output")
+	}
+	return fields[0], nil
+}
+
+func imageExists(tag string) (bool, error) {
+	cmd := execCommand("docker", "images", "-q", tag)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) != "", nil
 }
