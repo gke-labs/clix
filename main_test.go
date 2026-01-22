@@ -307,7 +307,7 @@ func TestBuildImage(t *testing.T) {
 		Git: "https://github.com/example/repo",
 	}
 
-	imageTag, err := buildImage(stdin, &stdout, &stderr, build)
+	imageTag, err := buildImage(stdin, &stdout, &stderr, build, "test-script.yaml")
 	if err != nil {
 		t.Fatalf("buildImage failed: %v", err)
 	}
@@ -315,7 +315,8 @@ func TestBuildImage(t *testing.T) {
 	// Check if image tag is correct
 	// Hash of https://github.com/example/repo
 	// We expect clix-repo-<hash>:abcdef1234567890
-	if !strings.HasPrefix(imageTag, "clix-repo-") {
+	// We expect clix-test-script-<hash>:abcdef1234567890
+	if !strings.HasPrefix(imageTag, "clix-test-script-") {
 		t.Errorf("Unexpected image tag prefix: %s", imageTag)
 	}
 	if !strings.HasSuffix(imageTag, ":abcdef1234567890") {
@@ -351,7 +352,7 @@ func TestBuildImage_Exists(t *testing.T) {
 		Git: "https://github.com/example/repo",
 	}
 
-	imageTag, err := buildImage(stdin, &stdout, &stderr, build)
+	imageTag, err := buildImage(stdin, &stdout, &stderr, build, "test-script.yaml")
 
 	if err != nil {
 
@@ -377,7 +378,8 @@ func TestBuildImage_Exists(t *testing.T) {
 
 	// Tag should still be returned
 
-	if !strings.HasPrefix(imageTag, "clix-repo-") {
+	// We expect clix-test-script-<hash>:abcdef1234567890
+	if !strings.HasPrefix(imageTag, "clix-test-script-") {
 
 		t.Errorf("Unexpected image tag: %s", imageTag)
 

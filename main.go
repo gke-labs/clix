@@ -38,9 +38,13 @@ type Script struct {
 	Env        []EnvVar     `json:"env,omitempty"`
 }
 
+// BuildConfig allows building an image from source code
 type BuildConfig struct {
-	Git        string `json:"git"`
-	Branch     string `json:"branch,omitempty"`
+	// Git is the repo URL we should clone to get the source code
+	Git string `json:"git"`
+	// Branch is the branch (or tag) we should clone. Defaults to the default branch
+	Branch string `json:"branch,omitempty"`
+	// Dockerfile is the path to the Dockerfile, relative to the git repo root
 	Dockerfile string `json:"dockerfile,omitempty"`
 }
 
@@ -85,7 +89,7 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 	}
 
 	if script.Build != nil {
-		imageName, err := buildImage(stdin, stdout, stderr, script.Build)
+		imageName, err := buildImage(stdin, stdout, stderr, script.Build, scriptPath)
 		if err != nil {
 			return fmt.Errorf("error building image: %w", err)
 		}
@@ -312,7 +316,7 @@ func runGo(stdin io.Reader, stdout, stderr io.Writer, config *GoConfig, args []s
 	return nil
 }
 
-func buildImage(stdin io.Reader, stdout, stderr io.Writer, build *BuildConfig) (string, error) {
+func buildImage(stdin io.Reader, stdout, stderr io.Writer, build *BuildConfig, scriptName string) (string, error) {
 	if build.Git == "" {
 		return "", fmt.Errorf("build.git is required")
 	}
@@ -323,16 +327,14 @@ func buildImage(stdin io.Reader, stdout, stderr io.Writer, build *BuildConfig) (
 		return "", fmt.Errorf("failed to get remote head: %w", err)
 	}
 
-	// Construct image tag: clix-<hash-of-repo-url>:<commit-hash>
+	// Construct image tag: clix-<script-name>-<hash-of-repo-url>:<commit-hash>
 	repoHash := sha256.Sum256([]byte(build.Git))
 	repoHashStr := hex.EncodeToString(repoHash[:])[:8] // Short hash for readability
 
-	// Extract base name for readability
-	parts := strings.Split(build.Git, "/")
-	baseName := parts[len(parts)-1]
-	baseName = strings.TrimSuffix(baseName, ".git")
+	baseName := filepath.Base(scriptName)
+	baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
 	baseName = strings.ReplaceAll(baseName, ":", "-")
-	// Clean up baseName further if needed, for now assume standard repo names
+	baseName = strings.ToLower(baseName)
 
 	imageTag := fmt.Sprintf("clix-%s-%s:%s", baseName, repoHashStr, commitHash)
 
