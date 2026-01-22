@@ -30,6 +30,12 @@ type Script struct {
 	Image      string    `json:"image,omitempty"`
 	Entrypoint string    `json:"entrypoint,omitempty"`
 	Mounts     []Mount   `json:"mounts,omitempty"`
+	Env        []EnvVar  `json:"env,omitempty"`
+}
+
+type EnvVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type Mount struct {
@@ -93,32 +99,10 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 }
 
 func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []string) error {
-	cmdArgs := []string{"run", "-i"}
-	if isTerminal(stdin) {
-		cmdArgs = append(cmdArgs, "-t")
-	}
-
-	resolvedMounts, err := resolveMounts(script.Mounts)
+	cmdArgs, err := buildDockerArgs(script, args, isTerminal(stdin))
 	if err != nil {
-		return fmt.Errorf("error resolving mounts: %w", err)
+		return fmt.Errorf("error building docker args: %w", err)
 	}
-
-	for _, m := range resolvedMounts {
-		cmdArgs = append(cmdArgs, "-v", fmt.Sprintf("%s:%s", m.HostPath, m.SandboxPath))
-	}
-
-	// Set working directory to CWD if possible
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("error getting current working directory: %w", err)
-	}
-	cmdArgs = append(cmdArgs, "-w", cwd)
-
-	if script.Entrypoint != "" {
-		cmdArgs = append(cmdArgs, "--entrypoint", script.Entrypoint)
-	}
-	cmdArgs = append(cmdArgs, script.Image)
-	cmdArgs = append(cmdArgs, args...)
 
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Stdin = stdin
@@ -135,7 +119,79 @@ func runDocker(stdin io.Reader, stdout, stderr io.Writer, script Script, args []
 	return nil
 }
 
-func resolveMounts(mounts []Mount) ([]Mount, error) {
+func buildDockerArgs(script Script, args []string, isTerm bool) ([]string, error) {
+	cmdArgs := []string{"run", "-i"}
+	if isTerm {
+		cmdArgs = append(cmdArgs, "-t")
+	}
+
+	// Resolve cache directory if needed
+	imageSHA := ""
+	needsSHA := false
+	for _, m := range script.Mounts {
+		if strings.Contains(m.HostPath, "{cacheDir}") {
+			needsSHA = true
+			break
+		}
+	}
+
+	if needsSHA {
+		var err error
+		imageSHA, err = getImageSHAFn(script.Image)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get image SHA: %w", err)
+		}
+	}
+
+	resolvedMounts, err := resolveMounts(script.Mounts, imageSHA)
+	if err != nil {
+		return nil, fmt.Errorf("error resolving mounts: %w", err)
+	}
+
+	for _, m := range resolvedMounts {
+		cmdArgs = append(cmdArgs, "-v", fmt.Sprintf("%s:%s", m.HostPath, m.SandboxPath))
+	}
+
+	for _, e := range script.Env {
+		cmdArgs = append(cmdArgs, "-e", fmt.Sprintf("%s=%s", e.Name, e.Value))
+	}
+
+	// Set working directory to CWD if possible
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("error getting current working directory: %w", err)
+	}
+	cmdArgs = append(cmdArgs, "-w", cwd)
+
+	if script.Entrypoint != "" {
+		cmdArgs = append(cmdArgs, "--entrypoint", script.Entrypoint)
+	}
+	cmdArgs = append(cmdArgs, script.Image)
+	cmdArgs = append(cmdArgs, args...)
+
+	return cmdArgs, nil
+}
+
+var getImageSHAFn = getImageSHA
+
+func getImageSHA(image string) (string, error) {
+	cmd := exec.Command("docker", "images", "--no-trunc", "--quiet", image)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("error running docker images: %w", err)
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("image not found: %s", image)
+	}
+	// sha is like "sha256:..."
+	if strings.HasPrefix(sha, "sha256:") {
+		sha = sha[7:]
+	}
+	return sha, nil
+}
+
+func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
 	var resolved []Mount
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -147,6 +203,22 @@ func resolveMounts(mounts []Mount) ([]Mount, error) {
 	}
 
 	for _, m := range mounts {
+		if strings.Contains(m.HostPath, "{cacheDir}") {
+			if imageSHA == "" {
+				return nil, fmt.Errorf("{cacheDir} used but image SHA not available")
+			}
+			userCache, err := os.UserCacheDir()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get user cache dir: %w", err)
+			}
+			// TODO: Eventually we'll need to do garbage collection
+			cacheDir := filepath.Join(userCache, "clix", "cache", imageSHA)
+			if err := os.MkdirAll(cacheDir, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create cache dir: %w", err)
+			}
+			m.HostPath = strings.ReplaceAll(m.HostPath, "{cacheDir}", cacheDir)
+		}
+
 		if m.HostPath == "git.repoRoot(cwd)" {
 			root, err := findGitRoot(cwd)
 			if err != nil {
