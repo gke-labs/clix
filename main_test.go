@@ -40,7 +40,8 @@ func TestRun(t *testing.T) {
 	scriptContent := fmt.Sprintf(`#!/usr/bin/env clix
 go:
   run: %s
-`, testToolPath)
+`,
+		testToolPath)
 
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		t.Fatalf("Failed to write script: %v", err)
@@ -233,4 +234,155 @@ func TestBuildDockerArgs(t *testing.T) {
 	if !foundMount {
 		t.Errorf("Expected mount for %s with host path containing %s, got args: %v", cacheMountDest, expectedHostPathPart, cmdArgs)
 	}
+}
+
+// Mocking execCommand
+func fakeExecCommand(command string, args ...string) *exec.Cmd {
+	cs := []string{"-test.run=TestHelperProcess", "--", command}
+	cs = append(cs, args...)
+	cmd := exec.Command(os.Args[0], cs...)
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	return cmd
+}
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	args := os.Args
+	for len(args) > 0 {
+		if args[0] == "--" {
+			args = args[1:]
+			break
+		}
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "No command\n")
+		os.Exit(2)
+	}
+
+	cmd, cmdArgs := args[0], args[1:]
+
+	behavior := os.Getenv("MOCK_BEHAVIOR")
+
+	switch cmd {
+	case "git":
+		if len(cmdArgs) >= 2 && cmdArgs[0] == "ls-remote" {
+			// Mock ls-remote: return a dummy hash
+			fmt.Printf("abcdef1234567890\trefs/heads/main\n")
+			os.Exit(0)
+		}
+		if len(cmdArgs) >= 1 && cmdArgs[0] == "clone" {
+			// Mock clone: success
+			fmt.Fprintf(os.Stderr, "Mock cloning...\n")
+			os.Exit(0)
+		}
+	case "docker":
+		if len(cmdArgs) >= 2 && cmdArgs[0] == "images" && cmdArgs[1] == "-q" {
+			if behavior == "image_exists" {
+				fmt.Printf("image-id\n")
+			}
+			// else empty output
+			os.Exit(0)
+		}
+		if len(cmdArgs) >= 2 && cmdArgs[0] == "buildx" {
+			// Mock build: success
+			fmt.Fprintf(os.Stderr, "Mock building...\n")
+			os.Exit(0)
+		}
+	}
+	os.Exit(0)
+}
+
+func TestBuildImage(t *testing.T) {
+	execCommand = fakeExecCommand
+	defer func() { execCommand = exec.Command }()
+
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("")
+
+	// Test 1: Image does not exist, should build
+	build := &BuildConfig{
+		Git: "https://github.com/example/repo",
+	}
+
+	imageTag, err := buildImage(stdin, &stdout, &stderr, build, "test-script.yaml")
+	if err != nil {
+		t.Fatalf("buildImage failed: %v", err)
+	}
+
+	// Check if image tag is correct
+	// Hash of https://github.com/example/repo
+	// We expect clix-repo-<hash>:abcdef1234567890
+	// We expect clix-test-script-<hash>:abcdef1234567890
+	if !strings.HasPrefix(imageTag, "clix-test-script-") {
+		t.Errorf("Unexpected image tag prefix: %s", imageTag)
+	}
+	if !strings.HasSuffix(imageTag, ":abcdef1234567890") {
+		t.Errorf("Unexpected image tag suffix: %s", imageTag)
+	}
+
+	// Check output
+	outStr := stderr.String()
+	if !strings.Contains(outStr, "Cloning") {
+		t.Errorf("Expected cloning message, got: %s", outStr)
+	}
+	if !strings.Contains(outStr, "Building image") {
+		t.Errorf("Expected building message, got: %s", outStr)
+	}
+}
+
+func TestBuildImage_Exists(t *testing.T) {
+
+	execCommand = fakeExecCommand
+
+	defer func() { execCommand = exec.Command }()
+
+	os.Setenv("MOCK_BEHAVIOR", "image_exists")
+
+	defer os.Unsetenv("MOCK_BEHAVIOR")
+
+	var stdout, stderr bytes.Buffer
+
+	stdin := strings.NewReader("")
+
+	build := &BuildConfig{
+
+		Git: "https://github.com/example/repo",
+	}
+
+	imageTag, err := buildImage(stdin, &stdout, &stderr, build, "test-script.yaml")
+
+	if err != nil {
+
+		t.Fatalf("buildImage failed: %v", err)
+
+	}
+
+	// Output should NOT contain cloning
+
+	outStr := stderr.String()
+
+	if strings.Contains(outStr, "Cloning") {
+
+		t.Errorf("Did not expect cloning message, got: %s", outStr)
+
+	}
+
+	if strings.Contains(outStr, "Building image") {
+
+		t.Errorf("Did not expect building message, got: %s", outStr)
+
+	}
+
+	// Tag should still be returned
+
+	// We expect clix-test-script-<hash>:abcdef1234567890
+	if !strings.HasPrefix(imageTag, "clix-test-script-") {
+
+		t.Errorf("Unexpected image tag: %s", imageTag)
+
+	}
+
 }
