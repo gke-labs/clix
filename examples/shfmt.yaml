@@ -1,0 +1,7 @@
+#!/usr/bin/env clix
+
+build:
+  git: https://github.com/mvdan/sh
+  dockerfile: cmd/shfmt/Dockerfile
+mounts:
+- hostPath: git.repoRoot(cwd)
