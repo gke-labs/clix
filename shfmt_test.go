@@ -24,21 +24,13 @@ import (
 )
 
 func TestRunShfmt(t *testing.T) {
-	// We allow running this test even in short mode if docker is missing (mocked)
-	// But if docker is present, we might want to skip in short mode?
-	// For now, let's just run it.
+	if testing.Short() {
+		t.Skip("skipping long-running test in short mode")
+	}
 
 	_, err := exec.LookPath("docker")
 	if err != nil {
-		// Docker not found, use mock
-		execCommand = fakeExecCommand
-		defer func() { execCommand = exec.Command }()
-	} else {
-		if testing.Short() {
-			t.Skip("skipping long-running test in short mode")
-		}
-		// Docker found, ensure we use real execCommand (it is default, but just in case)
-		execCommand = exec.Command
+		t.Skip("docker not found")
 	}
 
 	cwd, err := os.Getwd()
@@ -54,6 +46,10 @@ func TestRunShfmt(t *testing.T) {
 	// args: clix <script> --version
 	args := []string{"clix", scriptPath, "--version"}
 
+	// Use real execCommand (default)
+	// We do not mock here because we want to verify the actual build and run
+	// if docker is available.
+
 	err = run(stdin, &stdout, &stderr, args)
 	if err != nil {
 		t.Fatalf("run failed: %v\nStderr: %s", err, stderr.String())
@@ -61,7 +57,6 @@ func TestRunShfmt(t *testing.T) {
 
 	output := stdout.String()
 	// shfmt version output usually looks like "v3.X.X"
-	// Our mock returns "v3.10.0"
 	if !strings.Contains(output, "v3.") {
 		t.Errorf("Expected version output containing 'v3.', got: %q", output)
 	}
