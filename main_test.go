@@ -291,6 +291,11 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Fprintf(os.Stderr, "Mock building...\n")
 			os.Exit(0)
 		}
+		if len(cmdArgs) >= 1 && cmdArgs[0] == "run" {
+			// Mock run
+			fmt.Println("v3.10.0")
+			os.Exit(0)
+		}
 	}
 	os.Exit(0)
 }
