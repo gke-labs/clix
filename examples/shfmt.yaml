@@ -1,0 +1,6 @@
+#!/usr/bin/env clix
+
+build:
+  git: https://github.com/mvdan/sh
+mounts:
+- hostPath: git.repoRoot(cwd)
