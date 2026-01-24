@@ -59,5 +59,7 @@ func TestRunShfmt(t *testing.T) {
 	// shfmt version output usually looks like "v3.X.X"
 	if !strings.Contains(output, "v3.") {
 		t.Errorf("Expected version output containing 'v3.', got: %q", output)
+	} else {
+		t.Logf("Found shfmt version: %s", strings.TrimSpace(output))
 	}
 }
