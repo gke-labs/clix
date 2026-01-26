@@ -152,7 +152,7 @@ func buildDockerArgs(script Script, args []string, isTerm bool) ([]string, error
 	imageSHA := ""
 	needsSHA := false
 	for _, m := range script.Mounts {
-		if strings.Contains(m.HostPath, "{cacheDir}") {
+		if strings.Contains(m.HostPath, "{cacheDir}") || strings.Contains(m.HostPath, "${cacheDir}") {
 			needsSHA = true
 			break
 		}
@@ -226,9 +226,12 @@ func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
 	}
 
 	for _, m := range mounts {
-		if strings.Contains(m.HostPath, "{cacheDir}") {
+		if strings.Contains(m.HostPath, "{cacheDir}") || strings.Contains(m.HostPath, "${cacheDir}") {
+			if strings.Contains(m.HostPath, "{cacheDir}") {
+				fmt.Fprintf(os.Stderr, "Warning: usage of {cacheDir} is deprecated and will be removed in future versions. Please use ${cacheDir} instead.\n")
+			}
 			if imageSHA == "" {
-				return nil, fmt.Errorf("{cacheDir} used but image SHA not available")
+				return nil, fmt.Errorf("cacheDir variable used but image SHA not available")
 			}
 			userCache, err := os.UserCacheDir()
 			if err != nil {
@@ -240,6 +243,7 @@ func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
 				return nil, fmt.Errorf("failed to create cache dir: %w", err)
 			}
 			m.HostPath = strings.ReplaceAll(m.HostPath, "{cacheDir}", cacheDir)
+			m.HostPath = strings.ReplaceAll(m.HostPath, "${cacheDir}", cacheDir)
 		}
 
 		if m.HostPath == "git.repoRoot(cwd)" {
