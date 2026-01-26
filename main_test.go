@@ -234,6 +234,43 @@ func TestBuildDockerArgs(t *testing.T) {
 	if !foundMount {
 		t.Errorf("Expected mount for %s with host path containing %s, got args: %v", cacheMountDest, expectedHostPathPart, cmdArgs)
 	}
+
+	// 3. Python cache enabled via explicit mounts and env using ${cacheDir}
+	scriptPythonNew := Script{
+		Image: "python:3.11",
+		Mounts: []Mount{
+			{HostPath: "${cacheDir}/python", SandboxPath: "/tmp/.clix-pycache"},
+		},
+		Env: []EnvVar{
+			{Name: "PYTHONPYCACHEPREFIX", Value: "/tmp/.clix-pycache"},
+		},
+	}
+	cmdArgs, err = buildDockerArgs(scriptPythonNew, args, false)
+	if err != nil {
+		t.Fatalf("buildDockerArgs failed: %v", err)
+	}
+
+	// Check for env var and mount
+	foundEnv = false
+	foundMount = false
+
+	for i, arg := range cmdArgs {
+		if arg == "-e" && i+1 < len(cmdArgs) && cmdArgs[i+1] == envVar {
+			foundEnv = true
+		}
+		if arg == "-v" && i+1 < len(cmdArgs) && strings.Contains(cmdArgs[i+1], ":"+cacheMountDest) {
+			if strings.Contains(cmdArgs[i+1], expectedHostPathPart) {
+				foundMount = true
+			}
+		}
+	}
+
+	if !foundEnv {
+		t.Errorf("Expected environment variable %s, got args: %v", envVar, cmdArgs)
+	}
+	if !foundMount {
+		t.Errorf("Expected mount for %s with host path containing %s, got args: %v", cacheMountDest, expectedHostPathPart, cmdArgs)
+	}
 }
 
 // Mocking execCommand
