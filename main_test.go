@@ -138,6 +138,19 @@ func TestResolveMounts(t *testing.T) {
 				{HostPath: "/absolute/path", SandboxPath: "/absolute/path"},
 			},
 		},
+		{
+			name: "Sandbox path tilde expansion",
+			input: []Mount{
+				{HostPath: "/tmp", SandboxPath: "~/.config"},
+				{HostPath: "/tmp", SandboxPath: "~/data"},
+				{HostPath: "/tmp", SandboxPath: "~"},
+			},
+			expected: []Mount{
+				{HostPath: "/tmp", SandboxPath: "/root/.config"},
+				{HostPath: "/tmp", SandboxPath: "/root/data"},
+				{HostPath: "/tmp", SandboxPath: "/root"},
+			},
+		},
 	}
 
 	for _, tt := range tests {

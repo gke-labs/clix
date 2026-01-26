@@ -256,6 +256,12 @@ func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
 			m.HostPath = home
 		}
 
+		if strings.HasPrefix(m.SandboxPath, "~/") {
+			m.SandboxPath = "/root/" + m.SandboxPath[2:]
+		} else if m.SandboxPath == "~" {
+			m.SandboxPath = "/root"
+		}
+
 		if m.SandboxPath == "" {
 			m.SandboxPath = m.HostPath
 		}
