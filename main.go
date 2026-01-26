@@ -260,6 +260,13 @@ func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
 			m.HostPath = home
 		}
 
+		// TODO: Resolve this better once we find a container image where HOME is not /root
+		if strings.HasPrefix(m.SandboxPath, "~/") {
+			m.SandboxPath = "/root/" + m.SandboxPath[2:]
+		} else if m.SandboxPath == "~" {
+			m.SandboxPath = "/root"
+		}
+
 		if m.SandboxPath == "" {
 			m.SandboxPath = m.HostPath
 		}
