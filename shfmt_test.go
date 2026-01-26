@@ -38,7 +38,7 @@ func TestRunShfmt(t *testing.T) {
 		t.Fatalf("failed to get cwd: %v", err)
 	}
 
-	scriptPath := filepath.Join(cwd, "examples", "shfmt.yaml")
+	scriptPath := filepath.Join(cwd, "examples", "shfmt")
 
 	var stdout, stderr bytes.Buffer
 	stdin := strings.NewReader("")
