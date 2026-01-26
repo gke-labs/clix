@@ -4,6 +4,7 @@ image: gcr.io/google.com/cloudsdktool/google-cloud-cli:stable
 entrypoint: "gcloud"
 mounts:
 - hostPath: ~/.config/gcloud
+  sandboxPath: /root/.config/gcloud
 - hostPath: ${cacheDir}/python
   sandboxPath: /tmp/.clix-pycache
 env:
