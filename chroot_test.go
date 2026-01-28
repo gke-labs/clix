@@ -61,3 +61,36 @@ entrypoint: /bin/echo
 
 	t.Logf("Got expected error: %v", err)
 }
+
+func TestRunChrootWithPull(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("skipping chroot test: not root")
+	}
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "test-script-chroot-pull")
+	// hello-world binary is at /hello
+	scriptContent := `#!/usr/bin/env clix
+image: hello-world
+entrypoint: /hello
+`
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("Failed to write script: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("")
+	args := []string{"clix", scriptPath}
+
+	os.Setenv("CLIX_SANDBOX", "chroot")
+	defer os.Unsetenv("CLIX_SANDBOX")
+
+	err := run(stdin, &stdout, &stderr, args)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "Hello from Docker!") {
+		t.Errorf("unexpected output: %q", stdout.String())
+	}
+}
