@@ -94,12 +94,6 @@ func (s *ChrootSandbox) Run(stdin io.Reader, stdout, stderr io.Writer, script Sc
 }
 
 func prepareRootFS(imageRef string) (string, func(), error) {
-	// Check if it is a local dir
-	info, err := os.Stat(imageRef)
-	if err == nil && info.IsDir() {
-		return imageRef, func() {}, nil
-	}
-
 	// Assume it is a container image
 	img, err := crane.Pull(imageRef)
 	if err != nil {
