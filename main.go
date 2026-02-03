@@ -97,9 +97,12 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 	}
 
 	var sandbox Sandbox
-	if os.Getenv("CLIX_SANDBOX") == "chroot" {
+	switch os.Getenv("CLIX_SANDBOX") {
+	case "chroot":
 		sandbox = &ChrootSandbox{}
-	} else {
+	case "proot":
+		sandbox = &ProotSandbox{}
+	default:
 		sandbox = &DockerSandbox{}
 	}
 
