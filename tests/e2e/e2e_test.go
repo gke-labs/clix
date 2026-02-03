@@ -18,7 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -27,30 +27,14 @@ func TestE2E(t *testing.T) {
 		t.Skip("Skipping E2E test; set RUN_E2E=1 to run")
 	}
 
-	_, filename, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-
-	tmpDir, err := os.MkdirTemp("", "clix-e2e-")
+	// Get repo root using git rev-parse --show-toplevel
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
+		t.Fatalf("failed to get repo root: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	repoRoot := strings.TrimSpace(string(out))
 
-	clixPath := filepath.Join(tmpDir, "clix")
-
-	// Build clix
-	buildCmd := exec.Command("go", "build", "-o", clixPath, repoRoot)
-	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build clix: %v\nOutput: %s", err, out)
-	}
-
-	// Set up PATH
-	oldPath := os.Getenv("PATH")
-	newPath := tmpDir + string(os.PathListSeparator) + oldPath
-	os.Setenv("PATH", newPath)
-	defer os.Setenv("PATH", oldPath)
-
-	// Run example
+	// Run example. We assume 'clix' is already in the PATH.
 	shfmtExample := filepath.Join(repoRoot, "examples", "shfmt")
 	runCmd := exec.Command(shfmtExample, "--version")
 	if out, err := runCmd.CombinedOutput(); err != nil {

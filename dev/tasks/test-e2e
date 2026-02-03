@@ -19,6 +19,14 @@ set -euo pipefail
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "${REPO_ROOT}"
 
+# Build clix
+echo "Building clix..."
+mkdir -p .build/bin
+go build -o .build/bin/clix .
+
+# Add clix to PATH
+export PATH="${REPO_ROOT}/.build/bin:$PATH"
+
 # Run e2e tests via Go
 echo "Running e2e tests..."
 RUN_E2E=1 go test -v ./tests/e2e/...
