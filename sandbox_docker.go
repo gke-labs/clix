@@ -20,6 +20,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 type DockerSandbox struct{}
@@ -122,9 +124,5 @@ func isTerminal(r io.Reader) bool {
 	if !ok {
 		return false
 	}
-	fileInfo, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return (fileInfo.Mode() & os.ModeCharDevice) != 0
+	return term.IsTerminal(int(f.Fd()))
 }
