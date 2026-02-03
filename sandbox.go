@@ -128,7 +128,7 @@ func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
 
 	for _, m := range mounts {
 		if strings.Contains(m.HostPath, "{cacheDir}") || strings.Contains(m.HostPath, "${cacheDir}") {
-			if strings.Contains(m.HostPath, "{cacheDir}") {
+			if strings.Count(m.HostPath, "{cacheDir}") > strings.Count(m.HostPath, "${cacheDir}") {
 				fmt.Fprintf(os.Stderr, "Warning: usage of {cacheDir} is deprecated and will be removed in future versions. Please use ${cacheDir} instead.\n")
 			}
 			if imageSHA == "" {
