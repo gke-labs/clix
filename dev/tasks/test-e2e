@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Get the root of the repo
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Build clix
+echo "Building clix..."
+mkdir -p "${REPO_ROOT}/.build/bin"
+go build -o "${REPO_ROOT}/.build/bin/clix" "${REPO_ROOT}"
+
+# Add clix to PATH
+export PATH="${REPO_ROOT}/.build/bin:$PATH"
+
+# Run examples to verify shebang works
+echo "Running examples/shfmt --version..."
+"${REPO_ROOT}/examples/shfmt" --version
