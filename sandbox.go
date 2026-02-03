@@ -15,11 +15,173 @@
 package main
 
 import (
+	"archive/tar"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/google/go-containerregistry/pkg/crane"
 )
 
 // Sandbox is the interface implemented by all our sandboxing technologies (docker, chroot etc)
 type Sandbox interface {
 	// Run executes the container image defined by script
 	Run(stdin io.Reader, stdout, stderr io.Writer, script Script, args []string) error
+}
+
+func prepareRootFS(imageRef string) (string, string, func(), error) {
+	// Assume it is a container image
+	img, err := crane.Pull(imageRef)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("pulling image %q: %w", imageRef, err)
+	}
+
+	digest, err := img.Digest()
+	if err != nil {
+		return "", "", nil, fmt.Errorf("getting image digest: %w", err)
+	}
+	imageSHA := digest.Hex
+
+	tmpDir, err := os.MkdirTemp("", "clix-chroot-*")
+	if err != nil {
+		return "", "", nil, err
+	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
+
+	// Export to tar stream
+	pr, pw := io.Pipe()
+	go func() {
+		err := crane.Export(img, pw)
+		pw.CloseWithError(err)
+	}()
+
+	if err := untar(pr, tmpDir); err != nil {
+		cleanup()
+		return "", "", nil, fmt.Errorf("unpacking image: %w", err)
+	}
+
+	return tmpDir, imageSHA, cleanup, nil
+}
+
+func untar(r io.Reader, dest string) error {
+	tr := tar.NewReader(r)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		path := filepath.Join(dest, header.Name)
+
+		// Basic zip-slip protection
+		if !strings.HasPrefix(path, filepath.Clean(dest)) {
+			return fmt.Errorf("illegal file path in image: %s", path)
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(path, 0755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			// Ensure parent dir exists
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				return err
+			}
+			f, err := os.Create(path)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			f.Close()
+			os.Chmod(path, os.FileMode(header.Mode))
+		case tar.TypeSymlink:
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				return err
+			}
+			if err := os.Symlink(header.Linkname, path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
+	var resolved []Mount
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
+	for _, m := range mounts {
+		if strings.Contains(m.HostPath, "{cacheDir}") || strings.Contains(m.HostPath, "${cacheDir}") {
+			if strings.Contains(m.HostPath, "{cacheDir}") {
+				fmt.Fprintf(os.Stderr, "Warning: usage of {cacheDir} is deprecated and will be removed in future versions. Please use ${cacheDir} instead.\n")
+			}
+			if imageSHA == "" {
+				return nil, fmt.Errorf("cacheDir variable used but image SHA not available")
+			}
+			userCache, err := os.UserCacheDir()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get user cache dir: %w", err)
+			}
+			// TODO: Eventually we'll need to do garbage collection
+			cacheDir := filepath.Join(userCache, "clix", "cache", imageSHA)
+			if err := os.MkdirAll(cacheDir, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create cache dir: %w", err)
+			}
+			m.HostPath = strings.ReplaceAll(m.HostPath, "{cacheDir}", cacheDir)
+			m.HostPath = strings.ReplaceAll(m.HostPath, "${cacheDir}", cacheDir)
+		}
+
+		if m.HostPath == "git.repoRoot(cwd)" {
+			root, err := findGitRoot(cwd)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find git root: %w", err)
+			}
+			m.HostPath = root
+		}
+
+		if strings.HasPrefix(m.HostPath, "~/") {
+			m.HostPath = filepath.Join(home, m.HostPath[2:])
+		} else if m.HostPath == "~" {
+			m.HostPath = home
+		}
+
+		// TODO: Resolve this better once we find a container image where HOME is not /root
+		if strings.HasPrefix(m.SandboxPath, "~/") {
+			m.SandboxPath = "/root/" + m.SandboxPath[2:]
+		} else if m.SandboxPath == "~" {
+			m.SandboxPath = "/root"
+		}
+
+		if m.SandboxPath == "" {
+			m.SandboxPath = m.HostPath
+		}
+		resolved = append(resolved, m)
+	}
+	return resolved, nil
+}
+
+func findGitRoot(path string) (string, error) {
+	cmd := execCommand("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = path
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }

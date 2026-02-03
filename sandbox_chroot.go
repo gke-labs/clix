@@ -15,16 +15,11 @@
 package main
 
 import (
-	"archive/tar"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"syscall"
-
-	"github.com/google/go-containerregistry/pkg/crane"
 )
 
 type ChrootSandbox struct{}
@@ -35,7 +30,7 @@ func (s *ChrootSandbox) Run(stdin io.Reader, stdout, stderr io.Writer, script Sc
 		return fmt.Errorf("ChrootSandbox requires an image path (used as root directory)")
 	}
 
-	realRoot, cleanup, err := prepareRootFS(rootPath)
+	realRoot, _, cleanup, err := prepareRootFS(rootPath)
 	if err != nil {
 		return err
 	}
@@ -90,83 +85,5 @@ func (s *ChrootSandbox) Run(stdin io.Reader, stdout, stderr io.Writer, script Sc
 		return fmt.Errorf("error running chroot command: %w", err)
 	}
 
-	return nil
-}
-
-func prepareRootFS(imageRef string) (string, func(), error) {
-	// Assume it is a container image
-	img, err := crane.Pull(imageRef)
-	if err != nil {
-		return "", nil, fmt.Errorf("pulling image %q: %w", imageRef, err)
-	}
-
-	tmpDir, err := os.MkdirTemp("", "clix-chroot-*")
-	if err != nil {
-		return "", nil, err
-	}
-	cleanup := func() { os.RemoveAll(tmpDir) }
-
-	// Export to tar stream
-	pr, pw := io.Pipe()
-	go func() {
-		err := crane.Export(img, pw)
-		pw.CloseWithError(err)
-	}()
-
-	if err := untar(pr, tmpDir); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("unpacking image: %w", err)
-	}
-
-	return tmpDir, cleanup, nil
-}
-
-func untar(r io.Reader, dest string) error {
-	tr := tar.NewReader(r)
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		path := filepath.Join(dest, header.Name)
-
-		// Basic zip-slip protection
-		if !strings.HasPrefix(path, filepath.Clean(dest)) {
-			return fmt.Errorf("illegal file path in image: %s", path)
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(path, 0755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			// Ensure parent dir exists
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-				return err
-			}
-			f, err := os.Create(path)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return err
-			}
-			f.Close()
-			os.Chmod(path, os.FileMode(header.Mode))
-		case tar.TypeSymlink:
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-				return err
-			}
-			if err := os.Symlink(header.Linkname, path); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
