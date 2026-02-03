@@ -4,6 +4,7 @@ go 1.24.11
 
 require (
 	github.com/google/go-containerregistry v0.20.7
+	golang.org/x/term v0.39.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -20,5 +21,5 @@ require (
 	github.com/vbatts/tar-split v0.12.2 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/sync v0.18.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
 )
