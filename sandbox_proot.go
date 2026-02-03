@@ -19,18 +19,17 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"syscall"
 )
 
-type ChrootSandbox struct{}
+type ProotSandbox struct{}
 
-func (s *ChrootSandbox) Run(stdin io.Reader, stdout, stderr io.Writer, script Script, args []string) error {
+func (s *ProotSandbox) Run(stdin io.Reader, stdout, stderr io.Writer, script Script, args []string) error {
 	rootPath := script.Image
 	if rootPath == "" {
-		return fmt.Errorf("ChrootSandbox requires an image path (used as root directory)")
+		return fmt.Errorf("ProotSandbox requires an image path (used as root directory)")
 	}
 
-	realRoot, _, cleanup, err := prepareRootFS(rootPath)
+	realRoot, imageSHA, cleanup, err := prepareRootFS(rootPath)
 	if err != nil {
 		return err
 	}
@@ -53,36 +52,41 @@ func (s *ChrootSandbox) Run(stdin io.Reader, stdout, stderr io.Writer, script Sc
 		}
 	}
 
+	resolvedMounts, err := resolveMounts(script.Mounts, imageSHA)
+	if err != nil {
+		return fmt.Errorf("error resolving mounts: %w", err)
+	}
+
+	// proot -r realRoot [-b host:guest ...] cmdArgs
+	prootArgs := []string{"-r", realRoot}
+	for _, m := range resolvedMounts {
+		prootArgs = append(prootArgs, "-b", fmt.Sprintf("%s:%s", m.HostPath, m.SandboxPath))
+	}
+
+	prootArgs = append(prootArgs, cmdArgs...)
+
 	// Prepare the command
-	cmd := execCommand(cmdPath, cmdArgs[1:]...)
+	cmd := execCommand("proot", prootArgs...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	// Set SysProcAttr for chroot
-	// We also need to set Credential/Setsid/etc?
-	// Ideally we should drop privileges if we are root, but that's out of scope for now.
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Chroot: realRoot,
-	}
-
 	// We start at root of the new root
 	cmd.Dir = "/"
 
-	// We are not handling environment variables here yet, or mounts.
-	// Issue says: "leave a lot of functionality not supported"
-	if len(script.Mounts) > 0 {
-		return fmt.Errorf("mounts are not supported in chroot sandbox")
-	}
+	// Handle environment variables
 	if len(script.Env) > 0 {
-		return fmt.Errorf("environment variables are not supported in chroot sandbox")
+		cmd.Env = os.Environ()
+		for _, env := range script.Env {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", env.Name, env.Value))
+		}
 	}
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			os.Exit(exitErr.ExitCode())
 		}
-		return fmt.Errorf("error running chroot command: %w", err)
+		return fmt.Errorf("error running proot command: %w", err)
 	}
 
 	return nil

@@ -151,6 +151,11 @@ func TestResolveMounts(t *testing.T) {
 				{HostPath: "/tmp", SandboxPath: "/root"},
 			},
 		},
+		{
+			name:     "Cache directory expansion",
+			input:    []Mount{{HostPath: "${cacheDir}/pycache"}, {HostPath: "{cacheDir}/oldcache"}},
+			imageSHA: "abc",
+		},
 	}
 
 	for _, tt := range tests {
@@ -158,6 +163,18 @@ func TestResolveMounts(t *testing.T) {
 			got, err := resolveMounts(tt.input, tt.imageSHA)
 			if err != nil {
 				t.Fatalf("resolveMounts failed: %v", err)
+			}
+
+			if tt.name == "Cache directory expansion" {
+				for _, m := range got {
+					if strings.Contains(m.HostPath, "cacheDir") {
+						t.Errorf("Expected cacheDir to be expanded, got %q", m.HostPath)
+					}
+					if !strings.Contains(m.HostPath, "abc") {
+						t.Errorf("Expected host path to contain image SHA 'abc', got %q", m.HostPath)
+					}
+				}
+				return
 			}
 
 			if len(got) != len(tt.expected) {

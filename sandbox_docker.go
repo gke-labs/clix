@@ -19,7 +19,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -116,77 +115,6 @@ func getImageSHA(image string) (string, error) {
 		sha = sha[7:]
 	}
 	return sha, nil
-}
-
-func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
-	var resolved []Mount
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user home dir: %w", err)
-	}
-
-	for _, m := range mounts {
-		if strings.Contains(m.HostPath, "{cacheDir}") || strings.Contains(m.HostPath, "${cacheDir}") {
-			if strings.Contains(m.HostPath, "{cacheDir}") {
-				fmt.Fprintf(os.Stderr, "Warning: usage of {cacheDir} is deprecated and will be removed in future versions. Please use ${cacheDir} instead.\n")
-			}
-			if imageSHA == "" {
-				return nil, fmt.Errorf("cacheDir variable used but image SHA not available")
-			}
-			userCache, err := os.UserCacheDir()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get user cache dir: %w", err)
-			}
-			// TODO: Eventually we'll need to do garbage collection
-			cacheDir := filepath.Join(userCache, "clix", "cache", imageSHA)
-			if err := os.MkdirAll(cacheDir, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create cache dir: %w", err)
-			}
-			m.HostPath = strings.ReplaceAll(m.HostPath, "{cacheDir}", cacheDir)
-			m.HostPath = strings.ReplaceAll(m.HostPath, "${cacheDir}", cacheDir)
-		}
-
-		if m.HostPath == "git.repoRoot(cwd)" {
-			root, err := findGitRoot(cwd)
-			if err != nil {
-				return nil, fmt.Errorf("failed to find git root: %w", err)
-			}
-			m.HostPath = root
-		}
-
-		if strings.HasPrefix(m.HostPath, "~/") {
-			m.HostPath = filepath.Join(home, m.HostPath[2:])
-		} else if m.HostPath == "~" {
-			m.HostPath = home
-		}
-
-		// TODO: Resolve this better once we find a container image where HOME is not /root
-		if strings.HasPrefix(m.SandboxPath, "~/") {
-			m.SandboxPath = "/root/" + m.SandboxPath[2:]
-		} else if m.SandboxPath == "~" {
-			m.SandboxPath = "/root"
-		}
-
-		if m.SandboxPath == "" {
-			m.SandboxPath = m.HostPath
-		}
-		resolved = append(resolved, m)
-	}
-	return resolved, nil
-}
-
-func findGitRoot(path string) (string, error) {
-	cmd := execCommand("git", "rev-parse", "--show-toplevel")
-	cmd.Dir = path
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func isTerminal(r io.Reader) bool {
