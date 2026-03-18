@@ -102,6 +102,8 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 		sandbox = &ChrootSandbox{}
 	case "proot":
 		sandbox = &ProotSandbox{}
+	case "apple-container":
+		sandbox = &AppleContainerSandbox{}
 	default:
 		sandbox = &DockerSandbox{}
 	}
@@ -221,15 +223,25 @@ func buildImage(stdin io.Reader, stdout, stderr io.Writer, build *BuildConfig, s
 		dockerfile = build.Dockerfile
 	}
 
-	buildArgs := []string{"buildx", "build", "-f", dockerfile, "--load", "--tag", imageTag, "."}
+	var buildCmd string
+	var buildArgs []string
+
+	if os.Getenv("CLIX_SANDBOX") == "apple-container" {
+		buildCmd = "container"
+		buildArgs = []string{"build", "-t", imageTag, "-f", dockerfile, "."}
+	} else {
+		buildCmd = "docker"
+		// Use standard 'docker build' for better compatibility than 'buildx'
+		buildArgs = []string{"build", "-f", dockerfile, "-t", imageTag, "."}
+	}
 
 	fmt.Fprintf(stderr, "Building image %s...\n", imageTag)
-	cmd = execCommand("docker", buildArgs...)
+	cmd = execCommand(buildCmd, buildArgs...)
 	cmd.Dir = tempDir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("docker build failed: %w", err)
+		return "", fmt.Errorf("%s build failed: %w", buildCmd, err)
 	}
 
 	return imageTag, nil
@@ -261,7 +273,14 @@ func getRemoteHead(repo, branch string) (string, error) {
 }
 
 func imageExists(tag string) (bool, error) {
-	cmd := execCommand("docker", "images", "-q", tag)
+	cmdName := "docker"
+	args := []string{"images", "-q", tag}
+	if os.Getenv("CLIX_SANDBOX") == "apple-container" {
+		cmdName = "container"
+		args = []string{"image", "list", tag}
+	}
+
+	cmd := execCommand(cmdName, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return false, err
