@@ -30,3 +30,7 @@ go:
 
 `clix` will parse this and invoke:
 `go run sigs.k8s.io/kustomize/kustomize/v5@v5.8.0 <args>`
+
+## Coding Guidelines
+
+*   **Avoid "Train of Thought" Comments**: When writing code, do not include comments that describe the process of discovery (e.g., "Based on search results," or "According to the issue..."). Focus on explaining the final code's behavior or why it was implemented that way, rather than the research process.
