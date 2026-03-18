@@ -29,7 +29,7 @@ import (
 
 var execCommand = exec.Command
 
-func log(level int, format string, v ...interface{}) {
+func log(level int, format string, v ...any) {
 	verbosity := 0
 	if vStr := os.Getenv("CLIX_LOG_VERBOSITY"); vStr != "" {
 		fmt.Sscanf(vStr, "%d", &verbosity)
