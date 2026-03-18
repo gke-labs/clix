@@ -109,12 +109,15 @@ func getAppleContainerImageSHA(image string) (string, error) {
 		return "", fmt.Errorf("error running container image inspect: %w", err)
 	}
 
-	// Based on search results, the output is JSON.
-	// We expect a descriptor with a digest.
-	var info struct {
+	// The output is a JSON array.
+	// We expect a descriptor or index with a digest.
+	var info []struct {
 		Descriptor struct {
 			Digest string `json:"digest"`
 		} `json:"descriptor"`
+		Index struct {
+			Digest string `json:"digest"`
+		} `json:"index"`
 	}
 
 	if err := json.Unmarshal(out, &info); err != nil {
@@ -122,7 +125,14 @@ func getAppleContainerImageSHA(image string) (string, error) {
 		return "", fmt.Errorf("failed to parse container image inspect output: %w", err)
 	}
 
-	digest := info.Descriptor.Digest
+	if len(info) == 0 {
+		return "", fmt.Errorf("no image info found in container image inspect output")
+	}
+
+	digest := info[0].Descriptor.Digest
+	if digest == "" {
+		digest = info[0].Index.Digest
+	}
 	// Digest is likely like "sha256:..."
 	if strings.HasPrefix(digest, "sha256:") {
 		digest = digest[7:]

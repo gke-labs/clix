@@ -78,7 +78,7 @@ func TestHelperProcess(t *testing.T) {
 		}
 	case "container":
 		if len(cmdArgs) >= 3 && cmdArgs[0] == "image" && cmdArgs[1] == "inspect" {
-			fmt.Printf(`{"descriptor": {"digest": "sha256:abcdef123456"}}`)
+			fmt.Printf(`[{"descriptor": {"digest": "sha256:abcdef123456"}}]`)
 			os.Exit(0)
 		}
 		if len(cmdArgs) >= 3 && cmdArgs[0] == "image" && cmdArgs[1] == "list" {
