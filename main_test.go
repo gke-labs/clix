@@ -303,65 +303,6 @@ func TestBuildDockerArgs(t *testing.T) {
 	}
 }
 
-// Mocking execCommand
-func fakeExecCommand(command string, args ...string) *exec.Cmd {
-	cs := []string{"-test.run=TestHelperProcess", "--", command}
-	cs = append(cs, args...)
-	cmd := exec.Command(os.Args[0], cs...)
-	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
-	return cmd
-}
-
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	args := os.Args
-	for len(args) > 0 {
-		if args[0] == "--" {
-			args = args[1:]
-			break
-		}
-		args = args[1:]
-	}
-	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "No command\n")
-		os.Exit(2)
-	}
-
-	cmd, cmdArgs := args[0], args[1:]
-
-	behavior := os.Getenv("MOCK_BEHAVIOR")
-
-	switch cmd {
-	case "git":
-		if len(cmdArgs) >= 2 && cmdArgs[0] == "ls-remote" {
-			// Mock ls-remote: return a dummy hash
-			fmt.Printf("abcdef1234567890\trefs/heads/main\n")
-			os.Exit(0)
-		}
-		if len(cmdArgs) >= 1 && cmdArgs[0] == "clone" {
-			// Mock clone: success
-			fmt.Fprintf(os.Stderr, "Mock cloning...\n")
-			os.Exit(0)
-		}
-	case "docker":
-		if len(cmdArgs) >= 2 && cmdArgs[0] == "images" && cmdArgs[1] == "-q" {
-			if behavior == "image_exists" {
-				fmt.Printf("image-id\n")
-			}
-			// else empty output
-			os.Exit(0)
-		}
-		if len(cmdArgs) >= 2 && cmdArgs[0] == "buildx" {
-			// Mock build: success
-			fmt.Fprintf(os.Stderr, "Mock building...\n")
-			os.Exit(0)
-		}
-	}
-	os.Exit(0)
-}
-
 func TestBuildImage(t *testing.T) {
 	execCommand = fakeExecCommand
 	defer func() { execCommand = exec.Command }()
