@@ -29,6 +29,16 @@ import (
 
 var execCommand = exec.Command
 
+func log(level int, format string, v ...interface{}) {
+	verbosity := 0
+	if vStr := os.Getenv("CLIX_LOG_VERBOSITY"); vStr != "" {
+		fmt.Sscanf(vStr, "%d", &verbosity)
+	}
+	if verbosity >= level {
+		fmt.Fprintf(os.Stderr, "clix: "+format+"\n", v...)
+	}
+}
+
 type Script struct {
 	Go         *GoConfig    `json:"go,omitempty"`
 	Build      *BuildConfig `json:"build,omitempty"`
@@ -97,7 +107,8 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 	}
 
 	var sandbox Sandbox
-	switch os.Getenv("CLIX_SANDBOX") {
+	sandboxType := os.Getenv("CLIX_SANDBOX")
+	switch sandboxType {
 	case "chroot":
 		sandbox = &ChrootSandbox{}
 	case "proot":
@@ -105,17 +116,32 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 	case "apple-container":
 		sandbox = &AppleContainerSandbox{}
 	default:
+		sandboxType = "docker"
 		sandbox = &DockerSandbox{}
 	}
+	log(1, "Using sandbox: %s", sandboxType)
 
 	if script.Image != "" {
+		log(1, "Running image: %s", script.Image)
 		return sandbox.Run(stdin, stdout, stderr, script, scriptArgs)
 	}
 
 	if script.Go != nil {
 		if len(script.Mounts) > 0 {
+			log(1, "Script has mounts, transforming into Docker script")
 			// Transform into a Docker script
 			script.Image = "golang:latest"
+
+			// Add cache mounts for Go to speed up subsequent runs
+			script.Mounts = append(script.Mounts, Mount{
+				HostPath:    "${cacheDir}/gopath",
+				SandboxPath: "/go",
+			})
+			script.Mounts = append(script.Mounts, Mount{
+				HostPath:    "${cacheDir}/cache",
+				SandboxPath: "/root/.cache",
+			})
+
 			// We need to construct the command arguments for `go run ...`
 			goPackage := script.Go.Run
 			if script.Go.Version != "" {
@@ -125,8 +151,10 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
 			// Note: We don't set Entrypoint because runDocker appends Image then Args.
 			// So `docker run ... golang:latest go run pkg args...` works.
 			newArgs := append([]string{"go", "run", goPackage}, scriptArgs...)
+			log(1, "Transformed command: go run %s", goPackage)
 			return sandbox.Run(stdin, stdout, stderr, script, newArgs)
 		}
+		log(1, "Running go run: %s", script.Go.Run)
 		return runGo(stdin, stdout, stderr, script.Go, scriptArgs)
 	}
 
@@ -146,6 +174,7 @@ func runGo(stdin io.Reader, stdout, stderr io.Writer, config *GoConfig, args []s
 		target = fmt.Sprintf("%s@%s", goPackage, version)
 	}
 
+	log(1, "Running go run %s", target)
 	cmdArgs := append([]string{"run", target}, args...)
 	cmd := execCommand("go", cmdArgs...)
 	cmd.Stdin = stdin
@@ -168,22 +197,33 @@ func buildImage(stdin io.Reader, stdout, stderr io.Writer, build *BuildConfig, s
 		return "", fmt.Errorf("build.git is required")
 	}
 
+	log(1, "Building image from %s", build.Git)
+
 	// Get the latest commit hash from the remote
 	commitHash, err := getRemoteHead(build.Git, build.Branch)
 	if err != nil {
 		return "", fmt.Errorf("failed to get remote head: %w", err)
 	}
+	log(2, "Remote head is %s", commitHash)
 
 	// Construct image tag: clix-<script-name>-<hash-of-repo-url>:<commit-hash>
 	repoHash := sha256.Sum256([]byte(build.Git))
 	repoHashStr := hex.EncodeToString(repoHash[:])[:8] // Short hash for readability
+
+	absPath, err := filepath.Abs(scriptName)
+	if err != nil {
+		absPath = scriptName // Fallback
+	}
+	scriptHash := sha256.Sum256([]byte(absPath))
+	scriptHashStr := hex.EncodeToString(scriptHash[:])[:8]
 
 	baseName := filepath.Base(scriptName)
 	baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
 	baseName = strings.ReplaceAll(baseName, ":", "-")
 	baseName = strings.ToLower(baseName)
 
-	imageTag := fmt.Sprintf("clix-%s-%s:%s", baseName, repoHashStr, commitHash)
+	imageTag := fmt.Sprintf("clix-%s-%s-%s:%s", baseName, scriptHashStr, repoHashStr, commitHash)
+	log(1, "Generated image tag: %s", imageTag)
 
 	// Check if image exists
 	exists, err := imageExists(imageTag)
@@ -192,8 +232,11 @@ func buildImage(stdin io.Reader, stdout, stderr io.Writer, build *BuildConfig, s
 	}
 
 	if exists {
+		log(1, "Image %s already exists, using cache", imageTag)
 		return imageTag, nil
 	}
+
+	log(1, "Image %s not found, building...", imageTag)
 
 	// Clone and build
 	tempDir, err := os.MkdirTemp("", "clix-build-*")
@@ -248,6 +291,7 @@ func buildImage(stdin io.Reader, stdout, stderr io.Writer, build *BuildConfig, s
 }
 
 func getRemoteHead(repo, branch string) (string, error) {
+	log(2, "Getting remote head for %s (branch: %s)", repo, branch)
 	args := []string{"ls-remote", repo}
 	if branch != "" {
 		args = append(args, branch)
@@ -269,6 +313,7 @@ func getRemoteHead(repo, branch string) (string, error) {
 	if len(fields) == 0 {
 		return "", fmt.Errorf("could not parse git ls-remote output")
 	}
+	log(2, "Remote head for %s is %s", repo, fields[0])
 	return fields[0], nil
 }
 
@@ -280,10 +325,13 @@ func imageExists(tag string) (bool, error) {
 		args = []string{"image", "list", tag}
 	}
 
+	log(2, "Checking if image exists: %s %v", cmdName, args)
 	cmd := execCommand(cmdName, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(string(out)) != "", nil
+	exists := strings.TrimSpace(string(out)) != ""
+	log(2, "Image exists (%s): %v", tag, exists)
+	return exists, nil
 }

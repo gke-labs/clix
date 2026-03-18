@@ -143,8 +143,8 @@ func resolveMounts(mounts []Mount, imageSHA string) ([]Mount, error) {
 			if err := os.MkdirAll(cacheDir, 0755); err != nil {
 				return nil, fmt.Errorf("failed to create cache dir: %w", err)
 			}
-			m.HostPath = strings.ReplaceAll(m.HostPath, "{cacheDir}", cacheDir)
 			m.HostPath = strings.ReplaceAll(m.HostPath, "${cacheDir}", cacheDir)
+			m.HostPath = strings.ReplaceAll(m.HostPath, "{cacheDir}", cacheDir)
 		}
 
 		if m.HostPath == "git.repoRoot(cwd)" {

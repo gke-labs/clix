@@ -27,11 +27,13 @@ import (
 type DockerSandbox struct{}
 
 func (s *DockerSandbox) Run(stdin io.Reader, stdout, stderr io.Writer, script Script, args []string) error {
+	log(2, "DockerSandbox: preparing args")
 	cmdArgs, err := buildDockerArgs(script, args, isTerminal(stdin))
 	if err != nil {
 		return fmt.Errorf("error building docker args: %w", err)
 	}
 
+	log(1, "DockerSandbox: running docker %v", cmdArgs)
 	cmd := execCommand("docker", cmdArgs...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
@@ -103,6 +105,7 @@ func buildDockerArgs(script Script, args []string, isTerm bool) ([]string, error
 var getImageSHAFn = getImageSHA
 
 func getImageSHA(image string) (string, error) {
+	log(2, "Getting SHA for image: %s", image)
 	cmd := execCommand("docker", "images", "--no-trunc", "--quiet", image)
 	out, err := cmd.Output()
 	if err != nil {
@@ -110,12 +113,32 @@ func getImageSHA(image string) (string, error) {
 	}
 	sha := strings.TrimSpace(string(out))
 	if sha == "" {
-		return "", fmt.Errorf("image not found: %s", image)
+		log(1, "Image %s not found locally, pulling...", image)
+		// Try pulling it
+		pullCmd := execCommand("docker", "pull", image)
+		pullCmd.Stdout = os.Stderr
+		pullCmd.Stderr = os.Stderr
+		if err := pullCmd.Run(); err != nil {
+			return "", fmt.Errorf("failed to pull image %s: %w", image, err)
+		}
+		// Try again
+		cmd = execCommand("docker", "images", "--no-trunc", "--quiet", image)
+		out, err = cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("error running docker images after pull: %w", err)
+		}
+		sha = strings.TrimSpace(string(out))
 	}
-	// sha is like "sha256:"
+
+	if sha == "" {
+		return "", fmt.Errorf("image still not found after pull: %s", image)
+	}
+
+	// sha is like "sha256:..."
 	if strings.HasPrefix(sha, "sha256:") {
 		sha = sha[7:]
 	}
+	log(2, "Image SHA for %s is %s", image, sha)
 	return sha, nil
 }
 
